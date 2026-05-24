@@ -725,39 +725,36 @@ local function waitForLoadingScreen()
         pcall(function() obj.MouseButton1Click:Fire() end)
     end
 
-    -- Bước 1: VIM click giữa màn hình → dismiss "Click to Continue"
-    local centre = loadingGui:FindFirstChild("Centre")
-    local vp     = workspace.CurrentCamera.ViewportSize
-    DetailLbl.Text = "Clicking Continue..."
-    pcall(function()
-        VIM:SendMouseButtonEvent(vp.X/2, vp.Y/2, 0, true,  game, 0)
-        task.wait(0.1)
-        VIM:SendMouseButtonEvent(vp.X/2, vp.Y/2, 0, false, game, 0)
-    end)
-    task.wait(1.5)
+    local vp      = workspace.CurrentCamera.ViewportSize
+    local centre  = loadingGui:FindFirstChild("Centre")
 
-    -- Bước 2: Click CloseButton (nút X đỏ trên dialog Low Graphics)
-    local function clickClose()
-        local lg = centre and centre:FindFirstChild("LowGraphics")
-        if not lg then return false end
-        local closeBtn = lg:FindFirstChild("CloseButton")
-        if not closeBtn then return false end
-        DetailLbl.Text = "Clicking Close..."
-        fireBtn(closeBtn)
-        return true
-    end
-
-    -- Retry click close tối đa 8 lần cho đến khi loadingGui biến mất
-    for _ = 1, 8 do
-        if not loadingGui.Parent then break end
-        clickClose()
-        task.wait(1)
-    end
-
-    -- Chờ loadingGui thực sự biến mất (dù tự click hay player click tay)
+    -- Loop liên tục: thử cả Continue lẫn CloseButton mỗi giây
+    -- cho đến khi loadingGui tự biến mất (tối đa 5 phút)
     local deadline = tick() + 300
+    local step     = 0
     while loadingGui.Parent and tick() < deadline do
-        task.wait(0.3)
+        step = step + 1
+
+        -- Bước A: VIM click giữa màn hình → dismiss "Click to Continue"
+        DetailLbl.Text = string.format("Loading... click #%d", step)
+        pcall(function()
+            VIM:SendMouseButtonEvent(vp.X/2, vp.Y/2, 0, true,  game, 0)
+            task.wait(0.05)
+            VIM:SendMouseButtonEvent(vp.X/2, vp.Y/2, 0, false, game, 0)
+        end)
+
+        -- Bước B: nếu Centre đã xuất hiện, thử CloseButton luôn
+        centre = centre or loadingGui:FindFirstChild("Centre")
+        if centre then
+            local lg       = centre:FindFirstChild("LowGraphics")
+            local closeBtn = lg and lg:FindFirstChild("CloseButton")
+            if closeBtn then
+                DetailLbl.Text = string.format("Loading... close #%d", step)
+                fireBtn(closeBtn)
+            end
+        end
+
+        task.wait(1)
     end
 
     DetailLbl.Text = "Loading done ✓"
