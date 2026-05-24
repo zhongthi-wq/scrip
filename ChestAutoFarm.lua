@@ -10,22 +10,37 @@ local Chests  = Holder:WaitForChild("Chests")
 
 local SkillReq    = RS:WaitForChild("Packages"):WaitForChild("Warp")
                       :WaitForChild("Index"):WaitForChild("Event"):WaitForChild("Request")
-local VirtualUser = game:GetService("VirtualUserService")
+local VirtualUser = pcall(function() return game:GetService("VirtualUser") end)
+    and game:GetService("VirtualUser") or nil
 
 -- ===== ANTI AFK =====
 local function setupAntiAFK()
     if getconnections then
-        for _, conn in pairs(getconnections(player.Idled)) do
-            if conn["Disable"] then
-                conn["Disable"](conn)
-            elseif conn["Disconnect"] then
-                conn["Disconnect"](conn)
+        -- Executor hỗ trợ getconnections: ngắt tất cả Idled connections
+        local ok, conns = pcall(getconnections, player.Idled)
+        if ok and conns then
+            for _, conn in pairs(conns) do
+                if conn["Disable"] then
+                    conn["Disable"](conn)
+                elseif conn["Disconnect"] then
+                    conn["Disconnect"](conn)
+                end
             end
         end
-    else
+    elseif VirtualUser then
+        -- Có VirtualUser service: simulate input khi bị idle
         player.Idled:Connect(function()
-            VirtualUser:CaptureController()
-            VirtualUser:ClickButton2(Vector2.new())
+            pcall(function()
+                VirtualUser:CaptureController()
+                VirtualUser:ClickButton2(Vector2.new())
+            end)
+        end)
+    else
+        -- Fallback: jump nhỏ để reset idle timer
+        player.Idled:Connect(function()
+            local c = player.Character
+            local h = c and c:FindFirstChildOfClass("Humanoid")
+            if h then h.Jump = true end
         end)
     end
 end
@@ -640,7 +655,90 @@ task.spawn(function()
     end
 end)
 
+-- ===== LOADING SCREEN HANDLER =====
+local function waitForLoadingScreen()
+    local gui = player:WaitForChild("PlayerGui", 30)
+    if not gui then return end
+
+    local loadingGui = gui:FindFirstChild("LoadingGui")
+    if not loadingGui then return end   -- đã qua loading rồi
+
+    PhaseLbl.Text = "⏳  Chờ game load..."
+
+    -- Chờ Progress == 1
+    local progress = loadingGui:FindFirstChild("Progress")
+    if progress then
+        while (tonumber(progress.Value) or 0) < 1 do
+            DetailLbl.Text = string.format("Loading... %.0f%%", (tonumber(progress.Value) or 0) * 100)
+            task.wait(0.3)
+        end
+    else
+        task.wait(3)
+    end
+    task.wait(0.5)
+
+    local VIM = game:GetService("VirtualInputManager")
+
+    -- Helper: gọi handler của button qua getconnections
+    local function fireBtn(obj)
+        if getconnections then
+            for _, evName in ipairs({ "MouseButton1Click", "Activated" }) do
+                local ok, event = pcall(function() return obj[evName] end)
+                if ok and event then
+                    local ok2, conns = pcall(getconnections, event)
+                    if ok2 and conns then
+                        for _, conn in pairs(conns) do
+                            if conn.Function then pcall(conn.Function) end
+                        end
+                    end
+                end
+            end
+        end
+        pcall(function() obj.MouseButton1Click:Fire() end)
+    end
+
+    -- Bước 1: VIM click giữa màn hình → dismiss "Click to Continue"
+    local centre = loadingGui:FindFirstChild("Centre")
+    local vp     = workspace.CurrentCamera.ViewportSize
+    DetailLbl.Text = "Clicking Continue..."
+    pcall(function()
+        VIM:SendMouseButtonEvent(vp.X/2, vp.Y/2, 0, true,  game, 0)
+        task.wait(0.1)
+        VIM:SendMouseButtonEvent(vp.X/2, vp.Y/2, 0, false, game, 0)
+    end)
+    task.wait(1.5)
+
+    -- Bước 2: Click CloseButton (nút X đỏ trên dialog Low Graphics)
+    local function clickClose()
+        local lg = centre and centre:FindFirstChild("LowGraphics")
+        if not lg then return false end
+        local closeBtn = lg:FindFirstChild("CloseButton")
+        if not closeBtn then return false end
+        DetailLbl.Text = "Clicking Close..."
+        fireBtn(closeBtn)
+        return true
+    end
+
+    -- Retry click close tối đa 8 lần cho đến khi loadingGui biến mất
+    for _ = 1, 8 do
+        if not loadingGui.Parent then break end
+        clickClose()
+        task.wait(1)
+    end
+
+    -- Chờ loadingGui thực sự biến mất (dù tự click hay player click tay)
+    local deadline = tick() + 300
+    while loadingGui.Parent and tick() < deadline do
+        task.wait(0.3)
+    end
+
+    DetailLbl.Text = "Loading done ✓"
+    task.wait(0.5)
+end
+
 task.spawn(function()
+    waitForLoadingScreen()
+
     PhaseLbl.Text = "⏳  Loading..."; DetailLbl.Text = "Đang tải positions..."
     local ok, info, source = loadPositions()
     if not ok then
