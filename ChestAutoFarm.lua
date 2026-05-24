@@ -880,6 +880,23 @@ task.spawn(function()
                 end
             else
                 noProgress = 0
+
+                -- ── Proactive: nếu còn ít chest trong data nhưng buildList
+                --    đang bỏ sót do skipCounts → reset để thử lại ──────────
+                local dataLeft = getDataUncollectedCount()
+                local inList   = total  -- số chest còn trong list pass vừa rồi
+                if dataLeft > 0 and inList > 0 and dataLeft > inList then
+                    -- Có chest bị skip (dataLeft > inList) → xem có đáng reset không
+                    local stuckCount = dataLeft - inList
+                    -- Nếu số chest bị skip > 0 và data còn ít (gần xong)
+                    -- hoặc bị stuck quá nhiều so với list → reset skipCounts
+                    if dataLeft <= 50 or stuckCount >= 30 then
+                        PhaseLbl.Text = string.format(
+                            "♻  Reset skip (%d chest kẹt) — thử lại...", stuckCount)
+                        skipCounts = {}
+                    end
+                end
+
                 task.wait(0.2)
             end
         end
