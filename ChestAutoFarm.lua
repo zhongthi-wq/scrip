@@ -55,7 +55,7 @@ local TP_HEIGHT    = 4
 local CHEST_WAIT   = 0.2    -- giây chờ sau TP trước khi tìm chest
 local CHEST_RETRY  = 0.7    -- giây thêm nếu lần đầu không thấy
 local PACE_MIN     = 0.3    -- giây tối thiểu mỗi chest (tránh flood)
-local MAX_SKIP     = 2      -- fail liên tiếp → skip đến cycle sau
+local MAX_SKIP     = 4      -- fail liên tiếp (chest có trong WS nhưng không collect) → skip
 local TOUR_THRESH  = 1100   -- skip tour nếu đã nhặt hơn số này
 
 -- Claim reward (sau khi nhặt hết 1215 chest lần đầu)
@@ -567,12 +567,19 @@ local function collectPass(uncAtStart)
                     firetouchinterest(hrp, root, 1)
                 end)
             end
-        end
 
-        if isCollectedRT(item.id) then
-            skipCounts[item.id] = nil; got = got + 1
+            -- Chest có trong workspace nhưng không collect được → mới tăng skip
+            if isCollectedRT(item.id) then
+                skipCounts[item.id] = nil; got = got + 1
+            else
+                skipCounts[item.id] = (skipCounts[item.id] or 0) + 1
+            end
         else
-            skipCounts[item.id] = (skipCounts[item.id] or 0) + 1
+            -- Chest chưa load vào workspace (streaming) → KHÔNG tăng skip
+            -- Không phạt chest chưa tồn tại, tránh bị filter sớm
+            if isCollectedRT(item.id) then
+                skipCounts[item.id] = nil; got = got + 1
+            end
         end
 
         -- Update bar mỗi 10 chest
