@@ -10,6 +10,8 @@ local Chests  = Holder:WaitForChild("Chests")
 
 local SkillReq    = RS:WaitForChild("Packages"):WaitForChild("Warp")
                       :WaitForChild("Index"):WaitForChild("Event"):WaitForChild("Request")
+local Reliable    = RS:WaitForChild("Packages"):WaitForChild("Warp")
+                      :WaitForChild("Index"):WaitForChild("Event"):WaitForChild("Reliable")
 local VirtualUser = pcall(function() return game:GetService("VirtualUser") end)
     and game:GetService("VirtualUser") or nil
 
@@ -73,15 +75,18 @@ end
 
 -- ===== CLAIM REWARD =====
 local lastClaimTime = 0
-local CLAIM_INTERVAL = 30   -- giây giữa mỗi lần claim fallback
+local CLAIM_INTERVAL = 5   -- giây giữa mỗi lần claim trong lúc chờ respawn
 
 local function claimReward()
     lastClaimTime = tick()
     pcall(function()
-        R:FireServer(buffer.fromstring(OP_CLAIM), {{ { Action = "Claim" } }})
+        Reliable:FireServer(buffer.fromstring(OP_CLAIM), { { { Action = "Claim" } } })
     end)
     print("[Claim] Fired ✓")
 end
+
+-- Claim ngay khi script chạy (mới vào game)
+task.spawn(function() task.wait(2); claimReward() end)
 
 -- ===== AUTO BUY KEY =====
 local autoBuyKey  = false
@@ -804,11 +809,12 @@ task.spawn(function()
 
             -- ── Respawn xảy ra giữa lúc collect ──────────────────────
             if didRespawn then
+                claimReward()   -- game kill player = đã nhặt hết → claim luôn
                 PhaseLbl.Text  = "🔄  Chests respawned! — Tour cycle mới..."
                 DetailLbl.Text = ""
                 skipCounts     = {}
-                forceTour      = true   -- đảm bảo tour kể cả collected > 1000
-                break  -- thoát collect loop → cycle mới
+                forceTour      = true
+                break
             end
 
             -- ── List rỗng: tất cả đã nhặt hoặc skip ─────────────────
@@ -835,6 +841,7 @@ task.spawn(function()
                 end
 
                 setBar(collected, dataLeft)
+                claimReward()
                 waitForRespawn(collected)
                 break
             end
@@ -862,6 +869,7 @@ task.spawn(function()
                     else
                         PhaseLbl.Text = string.format("⚠  Skip hết (%d) — chờ respawn...", total)
                         setBar(getCollectedCount())
+                        claimReward()
                         waitForRespawn(getCollectedCount())
                         break
                     end
