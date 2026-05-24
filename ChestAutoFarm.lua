@@ -56,6 +56,9 @@ local PACE_MIN     = 0.3    -- giây tối thiểu mỗi chest (tránh flood)
 local MAX_SKIP     = 2      -- fail liên tiếp → skip đến cycle sau
 local TOUR_THRESH  = 1100   -- skip tour nếu đã nhặt hơn số này
 
+-- Claim reward (sau khi nhặt hết 1215 chest lần đầu)
+local OP_CLAIM     = "\026"
+
 -- Auto Buy Key
 local OP_BUY       = "1"
 local BUY_FLAG     = "\001"
@@ -66,6 +69,21 @@ local BUY_INTERVAL = 5
 local VALID_IDS = {}
 for i = 1, 1225 do
     if i < 1100 or i > 1109 then VALID_IDS[i] = true end
+end
+
+-- ===== CLAIM REWARD =====
+local cycleClaimed = false   -- tránh claim nhiều lần trong 1 cycle
+
+local function claimReward()
+    if cycleClaimed then return end
+    cycleClaimed = true
+    pcall(function()
+        R:FireServer(buffer.fromstring(OP_CLAIM), {{ { Action = "Claim" } }})
+    end)
+    print("[Claim] Fired Claim reward ✓")
+    Fluent and pcall(function()
+        -- hiện thông báo nếu dùng trong hub, bỏ qua nếu không có Fluent
+    end)
 end
 
 -- ===== AUTO BUY KEY =====
@@ -752,7 +770,8 @@ task.spawn(function()
     isRunning = true; t0 = tick()
 
     while isRunning do
-        cycleNum = cycleNum + 1
+        cycleNum   = cycleNum + 1
+        cycleClaimed = false   -- reset mỗi cycle mới
         CycleLbl.Text = "Cycle: " .. cycleNum
 
         waitForCharacter()
@@ -812,6 +831,7 @@ task.spawn(function()
                 end
 
                 setBar(collected, dataLeft)
+                claimReward()   -- claim phần thưởng nhặt hết chest
                 waitForRespawn(collected)
                 break
             end
@@ -839,6 +859,7 @@ task.spawn(function()
                     else
                         PhaseLbl.Text = string.format("⚠  Skip hết (%d) — chờ respawn...", total)
                         setBar(getCollectedCount())
+                        claimReward()   -- claim trước khi chờ respawn
                         waitForRespawn(getCollectedCount())
                         break
                     end
