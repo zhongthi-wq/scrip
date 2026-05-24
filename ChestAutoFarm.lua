@@ -81,9 +81,6 @@ local function claimReward()
         R:FireServer(buffer.fromstring(OP_CLAIM), {{ { Action = "Claim" } }})
     end)
     print("[Claim] Fired Claim reward ✓")
-    Fluent and pcall(function()
-        -- hiện thông báo nếu dùng trong hub, bỏ qua nếu không có Fluent
-    end)
 end
 
 -- ===== AUTO BUY KEY =====
