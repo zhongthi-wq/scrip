@@ -4,6 +4,7 @@
 local Players = game:GetService("Players")
 local player  = Players.LocalPlayer
 local RS      = game:GetService("ReplicatedStorage")
+local GuiService = game:GetService("GuiService")
 local Holder  = workspace:WaitForChild("Holder")
 local Map     = Holder:WaitForChild("Map")
 local Chests  = Holder:WaitForChild("Chests")
@@ -57,6 +58,9 @@ local CHEST_RETRY  = 0.7    -- giây thêm nếu lần đầu không thấy
 local PACE_MIN     = 0.3    -- giây tối thiểu mỗi chest (tránh flood)
 local MAX_SKIP     = 4      -- fail liên tiếp (chest có trong WS nhưng không collect) → skip
 local TOUR_THRESH  = 1100   -- skip tour nếu đã nhặt hơn số này
+local LOADING_PROGRESS_TIMEOUT = 60
+local LOADING_DISMISS_TIMEOUT  = 30
+local BASE_UI_W, BASE_UI_H     = 300, 210
 
 -- Claim reward (sau khi nhặt hết 1215 chest lần đầu)
 local OP_CLAIM     = "\026"
@@ -230,17 +234,36 @@ local function getChestRoot(chest)
     return chest:FindFirstChild("RootPart") or chest:FindFirstChildWhichIsA("BasePart")
 end
 
+local function touchChestRoot(hrp, root, forcePhysical)
+    if not hrp or not root then return false end
+
+    local touched = false
+    if type(firetouchinterest) == "function" then
+        touched = pcall(function()
+            firetouchinterest(hrp, root, 0)
+            task.wait(0.04)
+            firetouchinterest(hrp, root, 1)
+        end)
+    end
+
+    -- Mobile executors may not expose firetouchinterest reliably.
+    if forcePhysical or not touched then
+        pcall(function()
+            hrp.CFrame = root.CFrame + Vector3.new(0, 0.5, 0)
+            hrp.AssemblyLinearVelocity = Vector3.zero
+            hrp.AssemblyAngularVelocity = Vector3.zero
+        end)
+    end
+
+    return touched
+end
+
 -- collectVisible: chỉ dùng root part (không GetDescendants)
 local function collectVisible()
     local hrp = getHRP(); if not hrp then return end
     for _, chest in ipairs(Chests:GetChildren()) do
         local root = getChestRoot(chest)
-        if root then
-            pcall(function()
-                firetouchinterest(hrp, root, 0)
-                firetouchinterest(hrp, root, 1)
-            end)
-        end
+        if root then touchChestRoot(hrp, root, true) end
     end
 end
 
@@ -270,19 +293,50 @@ local function waitForCharacter()
     return player.Character
 end
 
+local function getViewportSize()
+    local cam = workspace.CurrentCamera
+    return cam and cam.ViewportSize or Vector2.new(BASE_UI_W, BASE_UI_H)
+end
+
 -- ===== GUI =====
 local existing = player.PlayerGui:FindFirstChild("ChestAutoFarm")
 if existing then existing:Destroy() end
 
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "ChestAutoFarm"; ScreenGui.ResetOnSpawn = false
+ScreenGui.IgnoreGuiInset = true
 ScreenGui.Parent = player.PlayerGui
 
 local Frame = Instance.new("Frame", ScreenGui)
-Frame.Size             = UDim2.fromOffset(300, 210)
-Frame.Position         = UDim2.new(0.5, -150, 0, 16)
+Frame.Size             = UDim2.fromOffset(BASE_UI_W, BASE_UI_H)
+Frame.AnchorPoint      = Vector2.new(0.5, 0)
+Frame.Position         = UDim2.new(0.5, 0, 0, 16)
 Frame.BackgroundColor3 = Color3.fromRGB(11, 11, 16)
 Frame.BorderSizePixel  = 0; Frame.Active = true; Frame.Draggable = true
+local FrameScale = Instance.new("UIScale", Frame)
+
+local function fitFrameToViewport()
+    local vp = getViewportSize()
+    local scaleX = (vp.X - 8) / BASE_UI_W
+    local scaleY = (vp.Y - 8) / BASE_UI_H
+    local scale = math.clamp(math.min(scaleX, scaleY), 0.35, 1)
+    FrameScale.Scale = scale
+
+    local safeY = 0 -- ScreenGui.IgnoreGuiInset = true; keep tiny mobile viewports usable.
+    local centeredY = (vp.Y - BASE_UI_H * scale) * 0.5
+    local y = math.max(2 + safeY, math.min(16 + safeY, centeredY))
+    Frame.Position = UDim2.new(0.5, 0, 0, y)
+end
+
+fitFrameToViewport()
+task.spawn(function()
+    while not workspace.CurrentCamera do
+        workspace:GetPropertyChangedSignal("CurrentCamera"):Wait()
+    end
+    local cam = workspace.CurrentCamera
+    cam:GetPropertyChangedSignal("ViewportSize"):Connect(fitFrameToViewport)
+    fitFrameToViewport()
+end)
 Instance.new("UICorner", Frame).CornerRadius = UDim.new(0, 10)
 local Stroke = Instance.new("UIStroke", Frame)
 Stroke.Color = Color3.fromRGB(255,190,50); Stroke.Thickness = 1.5; Stroke.Transparency = 0.25
@@ -414,11 +468,7 @@ local function searchAndCollectMissing(missingIds)
                         if h then
                             h.CFrame = CFrame.new(p + Vector3.new(0, TP_HEIGHT, 0))
                             task.wait(0.15)
-                            pcall(function()
-                                firetouchinterest(h, root, 0)
-                                task.wait(0.04)
-                                firetouchinterest(h, root, 1)
-                            end)
+                            touchChestRoot(h, root, true)
                         end
                     end
                 end
@@ -472,13 +522,7 @@ local function forcedRetryAll()
                 end
                 if chest then
                     local root = getChestRoot(chest)
-                    if root then
-                        pcall(function()
-                            firetouchinterest(hrp, root, 0)
-                            task.wait(0.05)
-                            firetouchinterest(hrp, root, 1)
-                        end)
-                    end
+                    if root then touchChestRoot(hrp, root, true) end
                 end
             end
             task.wait(0.2)
@@ -560,13 +604,7 @@ local function collectPass(uncAtStart)
 
         if chest then
             local root = getChestRoot(chest)
-            if root then
-                pcall(function()
-                    firetouchinterest(hrp, root, 0)
-                    task.wait(0.04)
-                    firetouchinterest(hrp, root, 1)
-                end)
-            end
+            if root then touchChestRoot(hrp, root, true) end
 
             -- Chest có trong workspace nhưng không collect được → mới tăng skip
             if isCollectedRT(item.id) then
@@ -679,12 +717,7 @@ task.spawn(function()
             local n = tonumber(chest.Name)
             if n and VALID_IDS[n] and snap[chest.Name] ~= true then
                 local root = getChestRoot(chest)
-                if root then
-                    pcall(function()
-                        firetouchinterest(hrp, root, 0)
-                        firetouchinterest(hrp, root, 1)
-                    end)
-                end
+                if root then touchChestRoot(hrp, root) end
             end
         end
     end
@@ -703,7 +736,8 @@ local function waitForLoadingScreen()
     -- Chờ Progress == 1
     local progress = loadingGui:FindFirstChild("Progress")
     if progress then
-        while (tonumber(progress.Value) or 0) < 1 do
+        local progressDeadline = tick() + LOADING_PROGRESS_TIMEOUT
+        while (tonumber(progress.Value) or 0) < 1 and tick() < progressDeadline do
             DetailLbl.Text = string.format("Loading... %.0f%%", (tonumber(progress.Value) or 0) * 100)
             task.wait(0.3)
         end
@@ -712,56 +746,227 @@ local function waitForLoadingScreen()
     end
     task.wait(0.5)
 
-    local VIM = game:GetService("VirtualInputManager")
+    local VIM
+    pcall(function()
+        VIM = game:GetService("VirtualInputManager")
+    end)
 
-    -- Helper: gọi handler của button qua getconnections
-    local function fireBtn(obj)
+    local function getGuiInset()
+        local ok, inset = pcall(function()
+            return GuiService:GetGuiInset()
+        end)
+        return (ok and inset) or Vector2.new(0, 0)
+    end
+
+    local function sendKey(key)
+        if not VIM then return end
+        pcall(function()
+            VIM:SendKeyEvent(true, key, false, game)
+            task.wait(0.04)
+            VIM:SendKeyEvent(false, key, false, game)
+        end)
+    end
+
+    local function sendMouseTap(x, y)
+        if not VIM then return end
+        pcall(function()
+            VIM:SendMouseButtonEvent(x, y, 0, true, game, 0)
+            task.wait(0.04)
+            VIM:SendMouseButtonEvent(x, y, 0, false, game, 0)
+        end)
+    end
+
+    local function sendTouchTap(x, y)
+        if not VIM then return end
+        pcall(function()
+            VIM:SendTouchEvent(0, Enum.UserInputState.Begin, x, y)
+            task.wait(0.04)
+            VIM:SendTouchEvent(0, Enum.UserInputState.End, x, y)
+        end)
+        -- Some mobile executors expose a nonstandard bool-style signature.
+        pcall(function()
+            VIM:SendTouchEvent(x, y, 0, true, game)
+            task.wait(0.04)
+            VIM:SendTouchEvent(x, y, 0, false, game)
+        end)
+    end
+
+    local function tapScreen(x, y)
+        if not VIM then return end
+        local vp = getViewportSize()
+        local inset = getGuiInset()
+        local points = {
+            Vector2.new(x, y),
+            Vector2.new(x + inset.X, y + inset.Y),
+            Vector2.new(x, y + inset.Y),
+            Vector2.new(x - inset.X, y - inset.Y),
+        }
+        for _, p in ipairs(points) do
+            local px = math.clamp(math.floor(p.X + 0.5), 1, math.max(1, vp.X - 1))
+            local py = math.clamp(math.floor(p.Y + 0.5), 1, math.max(1, vp.Y - 1))
+            sendMouseTap(px, py)
+            sendTouchTap(px, py)
+        end
+    end
+
+    local function fireEvent(event, ...)
+        if not event then return end
+        local args = { ... }
+        if firesignal then
+            pcall(function() firesignal(event, table.unpack(args)) end)
+        end
         if getconnections then
-            for _, evName in ipairs({ "MouseButton1Click", "Activated" }) do
-                local ok, event = pcall(function() return obj[evName] end)
-                if ok and event then
-                    local ok2, conns = pcall(getconnections, event)
-                    if ok2 and conns then
-                        for _, conn in pairs(conns) do
-                            if conn.Function then pcall(conn.Function) end
-                        end
+            local ok, conns = pcall(getconnections, event)
+            if ok and conns then
+                for _, conn in pairs(conns) do
+                    if conn.Function then
+                        pcall(function() conn.Function(table.unpack(args)) end)
+                    end
+                    if conn.Fire then
+                        pcall(function() conn:Fire(table.unpack(args)) end)
                     end
                 end
             end
         end
-        pcall(function() obj.MouseButton1Click:Fire() end)
     end
 
-    local vp      = workspace.CurrentCamera.ViewportSize
-    local centre  = loadingGui:FindFirstChild("Centre")
+    local function fireGuiInput(obj, x, y)
+        if not obj then return end
+        local pos2 = Vector2.new(x, y)
+        local fakeTouchBegin = {
+            UserInputType = Enum.UserInputType.Touch,
+            UserInputState = Enum.UserInputState.Begin,
+            Position = Vector3.new(x, y, 0),
+        }
+        local fakeTouchEnd = {
+            UserInputType = Enum.UserInputType.Touch,
+            UserInputState = Enum.UserInputState.End,
+            Position = Vector3.new(x, y, 0),
+        }
+        local fakeMouseBegin = {
+            UserInputType = Enum.UserInputType.MouseButton1,
+            UserInputState = Enum.UserInputState.Begin,
+            Position = Vector3.new(x, y, 0),
+        }
+        local fakeMouseEnd = {
+            UserInputType = Enum.UserInputType.MouseButton1,
+            UserInputState = Enum.UserInputState.End,
+            Position = Vector3.new(x, y, 0),
+        }
+
+        local okTouchTap, touchTap = pcall(function() return obj.TouchTap end)
+        if okTouchTap then fireEvent(touchTap, { pos2 }, false) end
+
+        local okInputBegan, inputBegan = pcall(function() return obj.InputBegan end)
+        if okInputBegan then
+            fireEvent(inputBegan, fakeTouchBegin, false)
+            fireEvent(inputBegan, fakeMouseBegin, false)
+        end
+
+        local okInputEnded, inputEnded = pcall(function() return obj.InputEnded end)
+        if okInputEnded then
+            fireEvent(inputEnded, fakeTouchEnd, false)
+            fireEvent(inputEnded, fakeMouseEnd, false)
+        end
+    end
+
+    local function fireBtn(obj)
+        if not obj then return end
+        for _, evName in ipairs({ "Activated", "MouseButton1Click", "MouseButton1Down", "MouseButton1Up" }) do
+            local ok, event = pcall(function() return obj[evName] end)
+            if ok then fireEvent(event) end
+        end
+        pcall(function() obj:Activate() end)
+        pcall(function() GuiService.SelectedObject = obj end)
+        sendKey(Enum.KeyCode.Return)
+        sendKey(Enum.KeyCode.Space)
+    end
+
+    local function clickGuiObject(obj)
+        if not obj or not obj:IsA("GuiObject") then return end
+        fireBtn(obj)
+        local pos = obj.AbsolutePosition
+        local size = obj.AbsoluteSize
+        if size.X > 0 and size.Y > 0 then
+            local x = pos.X + size.X / 2
+            local y = pos.Y + size.Y / 2
+            fireGuiInput(obj, x, y)
+            tapScreen(x, y)
+            task.wait(0.05)
+            fireGuiInput(obj, x, y)
+            fireBtn(obj)
+        end
+    end
+
+    local function getLoadingTargets()
+        local targets, seen = {}, {}
+        local function add(obj, score)
+            if obj and obj:IsA("GuiObject") and not seen[obj] then
+                seen[obj] = true
+                table.insert(targets, { obj = obj, score = score + (obj.Visible and 0 or 50) })
+            end
+        end
+
+        add(loadingGui:FindFirstChild("CloseButton", true), 1)
+        add(loadingGui:FindFirstChild("Screen", true), 2)
+
+        for _, obj in ipairs(loadingGui:GetDescendants()) do
+            if obj:IsA("GuiObject") then
+                local text = ""
+                pcall(function() text = obj.Text or "" end)
+                local label = (obj.Name .. " " .. text):lower()
+                local score = obj:IsA("GuiButton") and 20 or 100
+                if label:find("closebutton", 1, true) then score = 1
+                elseif label:find("close", 1, true) then score = 2
+                elseif label:find("continue", 1, true) then score = 3
+                elseif label:find("screen", 1, true) then score = 4
+                elseif label:find("skip", 1, true) then score = 5
+                elseif label:find("play", 1, true) then score = 6
+                end
+                if obj:IsA("GuiButton") or score < 100 then add(obj, score) end
+            end
+        end
+
+        table.sort(targets, function(a, b) return a.score < b.score end)
+        return targets
+    end
+
+    local function loadingStillVisible()
+        if not loadingGui.Parent then return false end
+        if loadingGui:IsA("ScreenGui") and loadingGui.Enabled == false then return false end
+        return true
+    end
 
     -- Loop liên tục: thử cả Continue lẫn CloseButton mỗi giây
-    -- cho đến khi loadingGui tự biến mất (tối đa 5 phút)
-    local deadline = tick() + 300
+    -- cho đến khi loadingGui tự biến mất; mobile fallback sẽ đi tiếp sau timeout
+    local deadline = tick() + LOADING_DISMISS_TIMEOUT
     local step     = 0
-    while loadingGui.Parent and tick() < deadline do
+    while loadingStillVisible() and tick() < deadline do
         step = step + 1
 
         -- Bước A: VIM click giữa màn hình → dismiss "Click to Continue"
         DetailLbl.Text = string.format("Loading... click #%d", step)
-        pcall(function()
-            VIM:SendMouseButtonEvent(vp.X/2, vp.Y/2, 0, true,  game, 0)
-            task.wait(0.05)
-            VIM:SendMouseButtonEvent(vp.X/2, vp.Y/2, 0, false, game, 0)
-        end)
+        local vp = getViewportSize()
+        tapScreen(vp.X / 2, vp.Y / 2)
+        sendKey(Enum.KeyCode.Return)
+        sendKey(Enum.KeyCode.Space)
 
-        -- Bước B: nếu Centre đã xuất hiện, thử CloseButton luôn
-        centre = centre or loadingGui:FindFirstChild("Centre")
-        if centre then
-            local lg       = centre:FindFirstChild("LowGraphics")
-            local closeBtn = lg and lg:FindFirstChild("CloseButton")
-            if closeBtn then
-                DetailLbl.Text = string.format("Loading... close #%d", step)
-                fireBtn(closeBtn)
-            end
+        -- Bước B: tìm tất cả nút loading hiện có, ưu tiên Screen/Continue/CloseButton.
+        local targets = getLoadingTargets()
+        for i, item in ipairs(targets) do
+            if i > 6 or not loadingStillVisible() then break end
+            DetailLbl.Text = string.format("Loading... btn #%d.%d", step, i)
+            clickGuiObject(item.obj)
+            task.wait(0.05)
         end
 
         task.wait(1)
+    end
+
+    if loadingStillVisible() then
+        DetailLbl.Text = "Loading timeout, continuing..."
+        pcall(function() loadingGui.Enabled = false end)
+        pcall(function() loadingGui:Destroy() end)
     end
 
     DetailLbl.Text = "Loading done ✓"
