@@ -72,15 +72,15 @@ for i = 1, 1225 do
 end
 
 -- ===== CLAIM REWARD =====
-local cycleClaimed = false   -- tránh claim nhiều lần trong 1 cycle
+local lastClaimTime = 0
+local CLAIM_INTERVAL = 30   -- giây giữa mỗi lần claim fallback
 
 local function claimReward()
-    if cycleClaimed then return end
-    cycleClaimed = true
+    lastClaimTime = tick()
     pcall(function()
         R:FireServer(buffer.fromstring(OP_CLAIM), {{ { Action = "Claim" } }})
     end)
-    print("[Claim] Fired Claim reward ✓")
+    print("[Claim] Fired ✓")
 end
 
 -- ===== AUTO BUY KEY =====
@@ -590,6 +590,9 @@ local function waitForRespawn(collectedSnap)
     local conn = player.CharacterAdded:Connect(function() respawned = true end)
     local deadline   = tick() + 600
 
+    -- Claim ngay khi vào chờ respawn
+    claimReward()
+
     while isRunning and not respawned and tick() < deadline do
         task.wait(3)
         local curCollected = getCollectedCount()
@@ -597,6 +600,11 @@ local function waitForRespawn(collectedSnap)
         local left         = math.ceil(math.max(0, deadline - tick()))
         DetailLbl.Text = string.format(
             "%d nhặt | %d còn  [chờ respawn %ds]", curCollected, curUnc, left)
+
+        -- Fallback claim mỗi 30s trong khi chờ
+        if tick() - lastClaimTime >= CLAIM_INTERVAL then
+            claimReward()
+        end
 
         -- Chest respawn: bất kỳ tăng nào là qua cycle mới
         if curUnc > uncSnap + 1 then break end
@@ -767,8 +775,7 @@ task.spawn(function()
     isRunning = true; t0 = tick()
 
     while isRunning do
-        cycleNum   = cycleNum + 1
-        cycleClaimed = false   -- reset mỗi cycle mới
+        cycleNum = cycleNum + 1
         CycleLbl.Text = "Cycle: " .. cycleNum
 
         waitForCharacter()
@@ -828,7 +835,6 @@ task.spawn(function()
                 end
 
                 setBar(collected, dataLeft)
-                claimReward()   -- claim phần thưởng nhặt hết chest
                 waitForRespawn(collected)
                 break
             end
@@ -856,7 +862,6 @@ task.spawn(function()
                     else
                         PhaseLbl.Text = string.format("⚠  Skip hết (%d) — chờ respawn...", total)
                         setBar(getCollectedCount())
-                        claimReward()   -- claim trước khi chờ respawn
                         waitForRespawn(getCollectedCount())
                         break
                     end
