@@ -991,51 +991,54 @@ local function waitForLoadingScreen()
         return true
     end
 
-    -- Loop liên tục: thử cả Continue lẫn CloseButton mỗi giây
-    -- cho đến khi loadingGui tự biến mất; mobile fallback sẽ đi tiếp sau timeout
-    local deadline = tick() + LOADING_DISMISS_TIMEOUT
-    local step     = 0
-    while loadingStillVisible() and tick() < deadline do
-        step = step + 1
-
-        -- Bước A: VIM click giữa màn hình → dismiss "Click to Continue"
-        DetailLbl.Text = string.format("Loading... click #%d", step)
-        local vp = getViewportSize()
-        tapScreen(vp.X / 2, vp.Y / 2)
-        sendKey(Enum.KeyCode.Return)
-        sendKey(Enum.KeyCode.Space)
-
-        if closeLowGraphics() and not getLowGraphics() then
-            break
+    -- Fire button trực tiếp — không dùng tọa độ màn hình, hoạt động mọi resolution
+    local function _fireBtn(obj)
+        pcall(function() obj:Activate() end)
+        if firesignal then
+            pcall(function() firesignal(obj.Activated) end)
+            pcall(function() firesignal(obj.MouseButton1Click) end)
         end
-
-        -- Bước B: tìm tất cả nút loading hiện có, ưu tiên Screen/Continue/CloseButton.
-        local targets = getLoadingTargets()
-        local triedCloseTarget = false
-        for i, item in ipairs(targets) do
-            if i > 6 or not loadingStillVisible() then break end
-            local targetName = item.obj.Name:lower()
-            triedCloseTarget = triedCloseTarget or targetName:find("close", 1, true) ~= nil
-            DetailLbl.Text = string.format("Loading... btn #%d.%d", step, i)
-            clickGuiObject(item.obj)
-            task.wait(0.05)
-            if triedCloseTarget and not getLowGraphics() then
-                break
+        if getconnections then
+            for _, evName in ipairs({ "Activated", "MouseButton1Click" }) do
+                local ok, conns = pcall(getconnections, obj[evName])
+                if ok and conns then
+                    for _, c in pairs(conns) do
+                        if c.Function then pcall(c.Function) end
+                        if c.Fire     then pcall(function() c:Fire() end) end
+                    end
+                end
             end
         end
-        if triedCloseTarget and not getLowGraphics() then
-            break
-        end
-
-        task.wait(1)
     end
 
-    if loadingStillVisible() then
-        DetailLbl.Text = "Loading timeout, continuing..."
+    local function _fireAll()
+        for _, obj in ipairs(loadingGui:GetDescendants()) do
+            if obj:IsA("GuiButton") then _fireBtn(obj) end
+        end
+    end
+
+    -- Force ẩn/xóa loadingGui — KHÔNG iterate descendants (quá chậm trên emulator)
+    local function _forceHide()
         pcall(function() loadingGui.Enabled = false end)
         pcall(function() loadingGui:Destroy() end)
     end
 
+    local function _isGone()
+        if not loadingGui.Parent then return true end
+        local ok, en = pcall(function() return loadingGui.Enabled end)
+        return ok and not en
+    end
+
+    local deadline = tick() + LOADING_DISMISS_TIMEOUT
+    local step     = 0
+    while tick() < deadline do
+        if _isGone() then break end
+        step += 1
+        DetailLbl.Text = string.format("Loading... skip #%d", step)
+        _fireAll()
+        _forceHide()
+        task.wait(0.3)
+    end
     DetailLbl.Text = "Loading done ✓"
     task.wait(0.5)
 end
