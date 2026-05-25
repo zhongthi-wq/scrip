@@ -872,9 +872,28 @@ local function waitForLoadingScreen()
 
     local function fireBtn(obj)
         if not obj then return end
+        local pos = obj:IsA("GuiObject") and obj.AbsolutePosition or Vector2.new(0, 0)
+        local size = obj:IsA("GuiObject") and obj.AbsoluteSize or Vector2.new(0, 0)
+        local x = pos.X + size.X / 2
+        local y = pos.Y + size.Y / 2
+        local fakeMouse = {
+            UserInputType = Enum.UserInputType.MouseButton1,
+            UserInputState = Enum.UserInputState.End,
+            Position = Vector3.new(x, y, 0),
+        }
+        local fakeTouch = {
+            UserInputType = Enum.UserInputType.Touch,
+            UserInputState = Enum.UserInputState.End,
+            Position = Vector3.new(x, y, 0),
+        }
+
         for _, evName in ipairs({ "Activated", "MouseButton1Click", "MouseButton1Down", "MouseButton1Up" }) do
             local ok, event = pcall(function() return obj[evName] end)
-            if ok then fireEvent(event) end
+            if ok then
+                fireEvent(event)
+                fireEvent(event, fakeMouse, 1)
+                fireEvent(event, fakeTouch, 1)
+            end
         end
         pcall(function() obj:Activate() end)
         pcall(function() GuiService.SelectedObject = obj end)
@@ -931,9 +950,44 @@ local function waitForLoadingScreen()
         return targets
     end
 
+    local function getLowGraphics()
+        local obj = loadingGui:FindFirstChild("LowGraphics", true)
+        if obj and obj:IsA("GuiObject") then return obj end
+        return nil
+    end
+
+    local function closeLowGraphics()
+        local lowGraphics = getLowGraphics()
+        local closeBtn = (lowGraphics and lowGraphics:FindFirstChild("CloseButton", true))
+            or loadingGui:FindFirstChild("CloseButton", true)
+
+        if closeBtn and closeBtn:IsA("GuiObject") then
+            for _ = 1, 3 do
+                DetailLbl.Text = "Loading... close low graphics"
+                clickGuiObject(closeBtn)
+                task.wait(0.12)
+                lowGraphics = getLowGraphics()
+                if not lowGraphics or not lowGraphics.Parent or lowGraphics.Visible == false then
+                    return true
+                end
+            end
+        end
+
+        lowGraphics = getLowGraphics()
+        if lowGraphics then
+            pcall(function() lowGraphics.Visible = false end)
+            pcall(function() lowGraphics.Active = false end)
+            pcall(function() lowGraphics:Destroy() end)
+            return true
+        end
+
+        return false
+    end
+
     local function loadingStillVisible()
         if not loadingGui.Parent then return false end
         if loadingGui:IsA("ScreenGui") and loadingGui.Enabled == false then return false end
+        if getLowGraphics() then return true end
         return true
     end
 
@@ -951,13 +1005,26 @@ local function waitForLoadingScreen()
         sendKey(Enum.KeyCode.Return)
         sendKey(Enum.KeyCode.Space)
 
+        if closeLowGraphics() and not getLowGraphics() then
+            break
+        end
+
         -- Bước B: tìm tất cả nút loading hiện có, ưu tiên Screen/Continue/CloseButton.
         local targets = getLoadingTargets()
+        local triedCloseTarget = false
         for i, item in ipairs(targets) do
             if i > 6 or not loadingStillVisible() then break end
+            local targetName = item.obj.Name:lower()
+            triedCloseTarget = triedCloseTarget or targetName:find("close", 1, true) ~= nil
             DetailLbl.Text = string.format("Loading... btn #%d.%d", step, i)
             clickGuiObject(item.obj)
             task.wait(0.05)
+            if triedCloseTarget and not getLowGraphics() then
+                break
+            end
+        end
+        if triedCloseTarget and not getLowGraphics() then
+            break
         end
 
         task.wait(1)
