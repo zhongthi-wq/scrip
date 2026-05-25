@@ -379,8 +379,15 @@ Instance.new("UICorner", BarFill).CornerRadius = UDim.new(1,0)
 local CycleLbl = makeLbl(101, 14, "Cycle: —", Color3.fromRGB(110,115,125))
 local TimeLbl  = makeLbl(101, 14, "",          Color3.fromRGB(100,100,110), Enum.TextXAlignment.Right)
 
+local StopBtn = Instance.new("TextButton", Frame)
+StopBtn.Size = UDim2.new(1,-16,0,28); StopBtn.Position = UDim2.new(0,8,0,120)
+StopBtn.BackgroundColor3 = Color3.fromRGB(80,18,18); StopBtn.BorderSizePixel = 0
+StopBtn.Font = Enum.Font.GothamBold; StopBtn.TextSize = 11
+StopBtn.Text = "■  Stop"; StopBtn.TextColor3 = Color3.fromRGB(255,110,110)
+Instance.new("UICorner", StopBtn).CornerRadius = UDim.new(0,6)
+
 local BuyBtn = Instance.new("TextButton", Frame)
-BuyBtn.Size = UDim2.new(1,-16,0,28); BuyBtn.Position = UDim2.new(0,8,0,120)
+BuyBtn.Size = UDim2.new(1,-16,0,26); BuyBtn.Position = UDim2.new(0,8,0,154)
 BuyBtn.BackgroundColor3 = Color3.fromRGB(25,55,25); BuyBtn.BorderSizePixel = 0
 BuyBtn.Font = Enum.Font.GothamBold; BuyBtn.TextSize = 11
 BuyBtn.Text = "🔑  Auto Buy Key: OFF"; BuyBtn.TextColor3 = Color3.fromRGB(140,180,140)
@@ -400,7 +407,7 @@ BuyBtn.MouseButton1Click:Connect(function()
     end
 end)
 
-BuyStatusLbl = makeLbl(154, 13, "", Color3.fromRGB(100,140,100), Enum.TextXAlignment.Center)
+BuyStatusLbl = makeLbl(183, 13, "", Color3.fromRGB(100,140,100), Enum.TextXAlignment.Center)
 
 local posTotal = 0
 local function setBar(collected, dataLeft)
@@ -662,6 +669,15 @@ local function waitForRespawn(collectedSnap)
     lastUncSaved  = 0
     task.wait(2)
 end
+
+-- ===== MAIN LOOP =====
+StopBtn.MouseButton1Click:Connect(function()
+    isRunning = false
+    PhaseLbl.Text = "⏹  Đã dừng"; DetailLbl.Text = ""
+    StopBtn.Text  = "■  Stopped"
+    StopBtn.BackgroundColor3 = Color3.fromRGB(45,45,45)
+    StopBtn.TextColor3       = Color3.fromRGB(130,130,130)
+end)
 
 task.spawn(function()
     while task.wait(1) do
